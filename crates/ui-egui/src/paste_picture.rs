@@ -198,6 +198,23 @@ mod tests {
         assert!(objects.as_array().is_some_and(|objects| objects.iter().any(|object| object["kind"] == "picture")));
     }
 
+    /// With no plain text, the clipboard picture gives way to an HTML input the caller passed, but
+    /// not to markup that holds nothing to paste.
+    #[test]
+    fn paste_without_text_keeps_explicit_html_and_skips_empty_markup() {
+        use craft::platform::clipboard::HTML;
+
+        let mut app = app_holding(&[rgba8(4, 4, 200)]);
+        app.run("edit.paste", json!({"html": "<p><b>given</b></p>"})).unwrap();
+        assert_eq!(pictures(&mut app), 0, "an explicit HTML input is not replaced by the bitmap");
+        assert_eq!(app.session.doc.plain_text(wordcraft_doc::StoryRef::Body), "given");
+
+        let empty = r#"<img src="https://example.test/a.png"><img src="https://example.test/b.png">"#;
+        let mut app = app_holding(&[Flavor::new(HTML, empty.as_bytes().to_vec()), rgba8(4, 4, 200)]);
+        app.run("edit.paste", json!({})).unwrap();
+        assert_eq!(pictures(&mut app), 1, "markup with nothing to paste leaves the bitmap");
+    }
+
     /// Text on the clipboard wins over a picture beside it (#584).
     #[test]
     fn paste_without_text_reads_the_system_clipboard() {

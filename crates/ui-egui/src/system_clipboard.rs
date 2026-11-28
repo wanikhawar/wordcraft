@@ -13,7 +13,7 @@ use craft::platform::clipboard::{HTML, RTF, Written};
 // PLAN(app-hub): craft facade path of the framework's clipboard handle, and the craft-platform dependency
 use craft::ui::runtime::commands::{ClipItem, ClipboardHandle};
 use serde_json::Value;
-use wordcraft_engine::cmd::paste::{MAX_PASTE_BYTES, MAX_PICTURE_BYTES};
+use wordcraft_engine::cmd::paste::{MAX_PASTE_BYTES, MAX_PICTURE_BYTES, has_rich_content};
 
 use crate::{WordApp, paste_picture};
 
@@ -128,11 +128,19 @@ pub(crate) fn fill(app: &mut WordApp, id: &str, params: &mut Value) -> Option<Re
     if ordinary {
         let text = o.get("text").and_then(Value::as_str);
         let html = o.get("html").and_then(Value::as_str);
-        if text.is_none() && html.is_none() && !o.contains_key("rtf") {
-            return paste_picture::paste(app);
+        let rtf = o.get("rtf").and_then(Value::as_str);
+        // No plain text: copied picture files, and a picture beside markup that holds nothing to
+        // paste (or beside none), paste as pictures (#45, #5859). A formatted selection keeps its
+        // markup.
+        if text.is_none()
+            && (clip.read_files().ok().flatten().is_some_and(|f| !f.is_empty()) || !has_rich_content(html, rtf))
+            && let Some(r) = paste_picture::paste(app)
+        {
+            return Some(r);
         }
-        if app.session.math.is_none()
-            && !cfg!(target_arch = "wasm32")
+        // A browser's Copy Image pastes its bitmap, not the HTML or address beside it (#2909); an
+        // unreadable bitmap leaves the markup to the rich paste.
+        if (text.is_none() || (app.session.math.is_none() && !cfg!(target_arch = "wasm32")))
             && html.is_some_and(|html| single_image_offer(html, text))
             && let Ok(Some(png)) = paste_picture::bitmap_png(&clip)
         {

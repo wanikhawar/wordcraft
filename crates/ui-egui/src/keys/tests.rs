@@ -406,8 +406,9 @@ fn mod_v_released_mod_first_pastes_the_clipboard_picture() {
     assert_eq!(pictures(h.state_mut()), 0);
 }
 
-/// #5859: Mod+V admits a rich-only clipboard (HTML or RTF with no plain-text or picture flavor)
-/// and still routes an image+HTML clipboard with no plain-text flavor to picture paste.
+/// #5859: Mod+V admits a rich-only clipboard (HTML or RTF with no plain-text or picture flavor).
+/// With no plain text, a single-image HTML offer pastes its bitmap, while a formatted selection
+/// offered beside a bitmap keeps its formatting.
 #[test]
 fn mod_v_pastes_rich_only_clipboard_and_preserves_picture_routing() {
     let ctrl = mod_held();
@@ -426,18 +427,23 @@ fn mod_v_pastes_rich_only_clipboard_and_preserves_picture_routing() {
     assert_eq!(body(h.state()), "rtf-only", "Mod+V pastes RTF-only clipboard");
     assert!(is_bold(&mut h), "RTF-only paste keeps formatting");
 
+    let image = || ClipItem::Image(std::sync::Arc::new(egui::ColorImage::from_rgba_unmultiplied([4, 4], &[200u8; 4 * 4 * 4])));
+    let img = r#"<img src="https://example.test/picture.png">"#;
+
     let mut h = alt_frame_app();
-    offer(
-        &h,
-        vec![
-            ClipItem::Image(std::sync::Arc::new(egui::ColorImage::from_rgba_unmultiplied([4, 4], &[200u8; 4 * 4 * 4]))),
-            ClipItem::Html("<p><b>fallback</b></p>".into()),
-        ],
-    );
+    offer(&h, vec![image(), ClipItem::Html(img.into())]);
     mods_frame(&mut h, ctrl, vec![key_event(Key::V, true, ctrl)]);
     mods_frame(&mut h, Modifiers::NONE, vec![key_event(Key::V, false, Modifiers::NONE)]);
-    assert_eq!(pictures(h.state_mut()), 1, "image+HTML with no plain text routes to picture paste");
+    assert_eq!(pictures(h.state_mut()), 1, "a single-image HTML offer with no plain text pastes its bitmap");
     assert_eq!(body(h.state()), "", "picture paste does not fall back to HTML text");
+
+    let mut h = alt_frame_app();
+    offer(&h, vec![image(), ClipItem::Html(format!("<p><b>fallback</b>{img}</p>").into())]);
+    mods_frame(&mut h, ctrl, vec![key_event(Key::V, true, ctrl)]);
+    mods_frame(&mut h, Modifiers::NONE, vec![key_event(Key::V, false, Modifiers::NONE)]);
+    assert_eq!(pictures(h.state_mut()), 0, "a formatted selection with no plain text is not replaced by its bitmap");
+    assert_eq!(body(h.state()), "fallback");
+    assert!(is_bold(&mut h), "the formatted selection keeps its bold");
 
     let dir = std::env::temp_dir().join(format!("wc-mod-v-uri-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

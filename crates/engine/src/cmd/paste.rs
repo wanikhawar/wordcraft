@@ -289,20 +289,29 @@ fn has_content(d: &Document) -> bool {
     })
 }
 
-/// Another program's formatted copy, from the system clipboard's HTML, else its RTF (#687), as a
-/// fragment of this document. `None` when neither is given, either is larger than
-/// [`MAX_PASTE_BYTES`], or it holds nothing to paste (the caller pastes the text then).
+/// Another program's formatted copy as a document: its HTML, else its RTF (#687). `None` when
+/// neither is given, each is blank or larger than [`MAX_PASTE_BYTES`], or neither holds anything
+/// to paste.
+fn rich_document(html: Option<&str>, rtf: Option<&str>) -> Option<Document> {
+    let fits = |t: &&str| !t.trim().is_empty() && t.len() <= MAX_PASTE_BYTES;
+    if let Some(doc) = html.filter(fits).map(import_html).filter(has_content) {
+        return Some(doc);
+    }
+    let rtf = rtf.filter(fits).filter(|t| looks_like_rtf(t))?;
+    wordcraft_formats::rtf::import(rtf.as_bytes()).ok().filter(has_content)
+}
+
+/// Whether Paste inserts something from `html` or `rtf`: false for markup that holds nothing to
+/// paste, such as a lone remote image with no description, so a front end can paste the
+/// clipboard's picture instead.
+pub fn has_rich_content(html: Option<&str>, rtf: Option<&str>) -> bool {
+    rich_document(html, rtf).is_some()
+}
+
+/// The system clipboard's HTML, else its RTF, as a fragment of this document. `None` when there
+/// is nothing to paste in either (the caller pastes the text then).
 pub fn rich_fragment(s: &mut Session, v: &Value) -> Option<Fragment> {
-    let fits = |k: &str| p::str(v, k).filter(|t| !t.trim().is_empty() && t.len() <= MAX_PASTE_BYTES);
-    let doc = fits("html").map(import_html);
-    let doc = match doc.filter(has_content) {
-        Some(d) => d,
-        None => {
-            let rtf = fits("rtf").filter(|t| looks_like_rtf(t))?;
-            wordcraft_formats::rtf::import(rtf.as_bytes()).ok().filter(has_content)?
-        }
-    };
-    Some(adopt(s, doc))
+    rich_document(p::str(v, "html"), p::str(v, "rtf")).map(|doc| adopt(s, doc))
 }
 
 /// What a Paste brings in.
